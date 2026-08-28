@@ -348,6 +348,12 @@ export default function AutomationStudioScreen() {
       return;
     }
     if (pcPollRef.current) { clearInterval(pcPollRef.current); pcPollRef.current = null; }
+    // Iter 766 (user video) — ESIC IP Registration needs the employee whose
+    // Employee Master details will auto-fill the registration form.
+    if (portalKey === "esic" && (action || "") === "ip_register" && !empId) {
+      setPcStatus("⚠ Pehle step 3 me EMPLOYEE select karein — usi ke Employee Master se ESIC registration form auto-fill hoga.");
+      return;
+    }
     setPcBusy("open");
     setPcStatus("Starting Chrome...");
     try {
@@ -360,7 +366,7 @@ export default function AutomationStudioScreen() {
       try {
         const lt = await api<any>("/admin/portal-automation/launch-token", {
           method: "POST",
-          body: JSON.stringify({ company_id: companyId, run_id: runIdArg || undefined, portal: portalKey, ecr_exclude_no_uan: excludeNoUan }),
+          body: JSON.stringify({ company_id: companyId, run_id: runIdArg || undefined, portal: portalKey, ecr_exclude_no_uan: excludeNoUan, user_id: empId || undefined }),
         });
         launchTok = lt?.token || "";
         // Iter 692 — the backend now pre-checks THIS firm's EPFO login and
@@ -452,6 +458,9 @@ export default function AutomationStudioScreen() {
         ecr_fetch: "⏳ Downloading this month's PF ECR file...",
         ecr_attached: "✅ ECR file ATTACHED — review and click Upload; the TRRN will be captured automatically after you upload",
         ecr_manual: "⚠ Page open but the ECR file could not be auto-attached — the Runner window shows the file location; attach it manually",
+        ip_fill: "⏳ ESIC IP Registration — Employee Master se form bhara ja raha hai (Yes/No → Date of Appointment → Mobile Validate → full form)...",
+        ip_form_filled: "✅ ESIC form Employee Master se AUTO-FILL ho gaya — har value VERIFY karein, State/District/Dispensary chunein aur khud Submit karein",
+        ip_manual: "⚠ ESIC form pura auto-fill nahi ho paya — Runner window me details dekh kar baaki fields khud bharein",
         open: `✅ ${P} Portal Open — login filled${who}, enter CAPTCHA & ${portalKey === "esic" ? "Login" : "Sign In"}`,
         open_nocreds: portalKey === "esic"
           ? "⚠ Portal opened but NO ESIC login is saved for THIS firm. Go to Firm Master → ESI Registration → fill ESI User ID + ESI Password → Save, then click again."

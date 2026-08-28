@@ -9655,3 +9655,32 @@ l) labour_reports monthly_register: cols = EMP_HEAD + Salary Process
   Kankani real data verified (firm flags null, creds/accident/EL removed).
 - APP_ITERATION=765; deploy_vps_iter765.sh (764 folded), temp_bundle
   serves kind=script -> deploy765.sh.
+
+## Iter 766 — ESIC IP Registration automation (Compliance Automation Studio)
+- USER VIDEO: complete the ESIC IP Registration flow beyond login.
+  portal_extension.py RUNNER_VERSION=30 / RUNNER_BUILD=29 (self-updates on
+  operator PC when run_listener.bat restarts).
+- launch-token now stores ip_user_id (studio passes user_id: empId).
+  New endpoint GET /portal-ext/ip-register-data?token= → normalized
+  Employee Master data (dob/doj → dd/mm/yyyy, phone 10-digit, aadhaar 12).
+  400 when no employee selected.
+- Runner: post-login "Attention New Employees!" popup auto-dismiss
+  (Close → I Agree); _NAV_E ip_register candidates now start with "Enrol
+  New Employee"; new _esic_ip_register(driver, api_base, token, st):
+  Yes/No radio by label (Yes+IP fill when master has esi_ip_no, else No +
+  confirm alert OK), DOA fill from doj, mobile fill + Validate click +
+  alert OK, then FULL FORM auto-fill via id/name pattern heuristics
+  (name/father/mother/dob/aadhaar/email/address/pincode/bank acct/ifsc/
+  bank/branch/nominee/uan + gender/marital/relation selects). NOTHING
+  auto-submitted — operator verifies + picks State/District/Dispensary.
+  Statuses: ip_fill / ip_form_filled / ip_manual (mapped in studio UI).
+- automation-studio.tsx: employee selection MANDATORY for esic_ip_register
+  (clear Hinglish message), user_id passed in launch-token body, 3 new
+  status messages.
+- Verified via curl: launch-token stores user_id, ip-register-data returns
+  MAHAVEER SINGH normalized (dob 20/07/1998, doj 01/06/2022), 400 without
+  employee, runner v30 contains _esic_ip_register. Live Selenium flow runs
+  on the operator's Windows PC against the real ESIC portal — needs user
+  verification there (heuristic selectors may need tuning after first run).
+- APP_ITERATION=766; deploy_vps_iter766.sh (765 folded); temp_bundle →
+  deploy766.sh.

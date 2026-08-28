@@ -20,8 +20,10 @@ The token lives in ``automation_ext_tokens`` and is tied to one firm.
 import base64
 import io
 import json
+import re
 import secrets
 import zipfile
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query
@@ -557,7 +559,7 @@ async def ext_ecr_file(token: str, run_id: str = ""):
 # the operator downloads ONCE and the folder stays current forever.
 
 # Bump this when _RUNNER_CODE changes; the launcher pulls the new script.
-RUNNER_VERSION = "29"
+RUNNER_VERSION = "30"
 
 # The actual login logic — served (not baked) so it can auto-update in the
 # operator's folder. Exposes run(API_BASE, TOKEN, portal).
@@ -568,7 +570,7 @@ import time
 import urllib.error
 import urllib.request
 
-RUNNER_BUILD = "28"
+RUNNER_BUILD = "29"
 
 PORTALS = {
     "esic": "https://portal.esic.gov.in/EmployerPortal/ESICInsurancePortal/Portal_Loginnew.aspx",
@@ -611,6 +613,211 @@ def _fresh_driver(opts):
     print("Downloading a matching Chrome + Driver pair (one time)...")
     os.environ["SE_FORCE_BROWSER_DOWNLOAD"] = "true"
     return webdriver.Chrome(options=opts)
+
+
+def _esic_ip_register(driver, api_base, token, st):
+    """Iter 766 (user video) — ESIC IP REGISTRATION auto-fill.
+
+    After 'Enrol New Employee' opens: pick Yes/No for existing IP number,
+    fill Date of Appointment + Mobile, click Validate, then when the FULL
+    registration form opens fill every field we can from the Employee
+    Master. The operator verifies values, picks State/District/Dispensary
+    and submits — nothing is auto-submitted."""
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import Select
+
+    st("ip_fill")
+    try:
+        req = urllib.request.Request(
+            api_base + "/portal-ext/ip-register-data?token=" + token)
+        emp = json.loads(urllib.request.urlopen(req, timeout=30)
+                         .read().decode()).get("employee") or {}
+    except Exception as e:
+        print("Employee data fetch failed (%s) - fill the form manually."
+              % str(e)[:120])
+        st("ip_manual")
+        return
+    print("Employee: %s (%s)" % (emp.get("name"), emp.get("employee_code")))
+
+    def _alert_ok(rounds=4):
+        for _ in range(rounds):
+            time.sleep(1)
+            try:
+                a = driver.switch_to.alert
+                txt = (a.text or "")[:140]
+                a.accept()
+                print("  popup OK: %s" % txt)
+            except Exception:
+                return
+
+    def _find(pats, exc=(), kinds=("input", "textarea")):
+        for k in kinds:
+            try:
+                els = driver.find_elements(By.TAG_NAME, k)
+            except Exception:
+                continue
+            for el in els:
+                try:
+                    if not el.is_displayed():
+                        continue
+                    key = ((el.get_attribute("id") or "") + " "
+                           + (el.get_attribute("name") or "")).lower()
+                    if any(x in key for x in exc):
+                        continue
+                    if any(p in key for p in pats):
+                        return el
+                except Exception:
+                    continue
+        return None
+
+    def _setv(el, val):
+        try:
+            driver.execute_script(
+                "arguments[0].value=arguments[1];"
+                "arguments[0].dispatchEvent(new Event('input',{bubbles:true}));"
+                "arguments[0].dispatchEvent(new Event('change',{bubbles:true}));",
+                el, str(val))
+            return True
+        except Exception:
+            try:
+                el.clear()
+                el.send_keys(str(val))
+                return True
+            except Exception:
+                return False
+
+    def _radio_label(r):
+        try:
+            return (driver.execute_script(
+                "var r=arguments[0];"
+                "var l=r.id?document.querySelector('label[for=\"'+r.id+'\"]'):null;"
+                "if(l)return l.textContent;"
+                "var t=r.parentElement?r.parentElement.textContent:'';"
+                "return t;", r) or "").strip().lower()
+        except Exception:
+            return ""
+
+    def _click_yes_no(want_yes):
+        """Click the FIRST visible Yes/No radio pair on the page."""
+        try:
+            radios = [x for x in driver.find_elements(
+                By.CSS_SELECTOR, "input[type='radio']") if x.is_displayed()]
+        except Exception:
+            return False
+        want = "yes" if want_yes else "no"
+        for r in radios:
+            lab = _radio_label(r)
+            val = (r.get_attribute("value") or "").strip().lower()
+            if lab.startswith(want) or val == want or \
+                    (val in ("y", "n") and val == want[0]):
+                try:
+                    driver.execute_script("arguments[0].click();", r)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    # ── STEP 1: existing insurance (IP) number — Yes/No ──────────────
+    _alert_ok(2)
+    ip_no = (emp.get("esi_ip_no") or "").strip()
+    if _click_yes_no(bool(ip_no)):
+        print("  '%s' selected (existing IP number %s)"
+              % ("Yes" if ip_no else "No", ip_no or "not in master"))
+    _alert_ok()          # "please re-confirm" popup on No
+    time.sleep(2)
+    if ip_no:
+        el = _find(("insurance", "ipno", "ip_no", "txtip", "ipnumber"))
+        if el and _setv(el, ip_no):
+            print("  IP Number filled: %s" % ip_no)
+
+    # ── STEP 2: Date of Appointment (portal allows max ~10 days back) ─
+    if emp.get("doj"):
+        el = _find(("appoint", "doa", "dtapp"))
+        if el and _setv(el, emp["doj"]):
+            print("  Date of Appointment filled: %s (portal allows max 10 "
+                  "days back - adjust if it rejects)" % emp["doj"])
+        _alert_ok(2)
+
+    # ── STEP 3: Mobile number + Validate ─────────────────────────────
+    if emp.get("phone"):
+        el = _find(("mobile", "mob"), exc=("father", "nominee", "emer"))
+        if el and _setv(el, emp["phone"]):
+            print("  Mobile filled: %s" % emp["phone"])
+            try:
+                btns = [x for x in driver.find_elements(
+                    By.XPATH,
+                    "//input[contains(translate(@value,'VALIDATE','validate')"
+                    ",'validate')] | //button[contains(translate(.,"
+                    "'VALIDATE','validate'),'validate')] | //a[contains("
+                    "translate(.,'VALIDATE','validate'),'validate')]")
+                    if x.is_displayed()]
+                if btns:
+                    driver.execute_script("arguments[0].click();", btns[0])
+                    print("  Validate clicked")
+            except Exception:
+                pass
+            _alert_ok()
+            time.sleep(3)
+
+    # ── STEP 4: FULL FORM — fill everything we have from the master ──
+    _alert_ok(2)
+    fills = [
+        (("aadhaar", "aadhar", "uid"), (), emp.get("aadhaar_no")),
+        (("txtname", "insuredname", "empname", "fullname"),
+         ("father", "mother", "nominee", "bank", "branch", "guard", "user"),
+         emp.get("name")),
+        (("father", "husband", "fhname"), ("nominee",), emp.get("father_name")),
+        (("mother",), (), emp.get("mother_name")),
+        (("dob", "birth"), ("nominee",), emp.get("dob")),
+        (("email",), (), emp.get("email")),
+        (("address", "add1", "addr"), ("nominee", "perm", "bank", "email"),
+         emp.get("address")),
+        (("pincode", "pin_"), ("nominee",), emp.get("pincode")),
+        (("account", "accno", "acno"), (), emp.get("bank_account")),
+        (("ifsc",), (), emp.get("ifsc")),
+        (("bankname", "txtbank"), ("branch",), emp.get("bank_name")),
+        (("branch",), (), emp.get("branch_name")),
+        (("nominee", "nomname"), ("relation", "dob", "add", "share"),
+         emp.get("nominee_name")),
+        (("uan",), (), emp.get("uan_no")),
+    ]
+    n = 0
+    for pats, exc, val in fills:
+        if not val:
+            continue
+        el = _find(pats, exc)
+        if el is not None and not (el.get_attribute("value") or "").strip():
+            if _setv(el, val):
+                n += 1
+    # dropdowns — gender / marital status / nominee relation
+    sels = [
+        (("gender", "sex"),
+         ("male",) if emp.get("gender") == "M"
+         else ("female",) if emp.get("gender") == "F" else ()),
+        (("marital",), (emp.get("marital_status") or "",)),
+        (("relation",), (emp.get("nominee_relation") or "",)),
+    ]
+    for pats, opts in sels:
+        opts = tuple(o for o in opts if o)
+        if not opts:
+            continue
+        el = _find(pats, kinds=("select",))
+        if el is None:
+            continue
+        try:
+            s = Select(el)
+            for o in s.options:
+                ot = (o.text or "").strip().lower()
+                if any(x.lower() in ot for x in opts):
+                    s.select_by_visible_text(o.text)
+                    n += 1
+                    break
+        except Exception:
+            pass
+    print("AUTO-FILLED %d field(s) from the Employee Master." % n)
+    print("VERIFY every value, choose State / District / Dispensary and")
+    print("submit the form yourself - nothing is auto-submitted.")
+    st("ip_form_filled" if n else "ip_manual")
 
 
 def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
@@ -929,7 +1136,9 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                     # Iter 701 (user request) — like EPFO, auto-open the
                     # chosen ESIC page after the login completes.
                     _NAV_E = {
-                        "ip_register": ["Register New IP", "REGISTER NEW IP",
+                        "ip_register": ["Enrol New Employee",
+                                        "Enroll New Employee",
+                                        "Register New IP", "REGISTER NEW IP",
                                         "Register new IP", "IP Registration"],
                         "contrib": ["File Monthly Contribution",
                                     "Online Monthly Contribution",
@@ -958,6 +1167,28 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                 _st("navigating")
                                 print("Logged in - opening the page...")
                                 time.sleep(2)
+                                # Iter 766 (user video) — dismiss the
+                                # "Attention New Employees!" popup first
+                                # (Close, then I Agree — same as manual).
+                                for _pt in ("Close", "I Agree"):
+                                    try:
+                                        _ps = [x for x in
+                                               driver.find_elements(
+                                                   By.XPATH,
+                                                   "//button[contains(.,'%s')]"
+                                                   " | //input[contains("
+                                                   "@value,'%s')] | //a["
+                                                   "contains(.,'%s')]"
+                                                   % (_pt, _pt, _pt))
+                                               if x.is_displayed()]
+                                        if _ps:
+                                            driver.execute_script(
+                                                "arguments[0].click();",
+                                                _ps[0])
+                                            print("  clicked '%s'" % _pt)
+                                            time.sleep(1)
+                                    except Exception:
+                                        pass
                                 _done = False
                                 for _t in _cands:
                                     try:
@@ -981,6 +1212,21 @@ def run(API_BASE, TOKEN, portal, run_id=None, job_id=None, action=None):
                                     _st("action_open")
                                     print("Page open - continue in the "
                                           "Chrome window.")
+                                    # Iter 766 (user video) — complete the
+                                    # ESIC IP Registration: Yes/No + DOA +
+                                    # mobile Validate, then auto-fill the
+                                    # full form from the Employee Master.
+                                    if (action or "").lower() == \
+                                            "ip_register":
+                                        time.sleep(2)
+                                        try:
+                                            _esic_ip_register(
+                                                driver, API_BASE, TOKEN, _st)
+                                        except Exception as _e:
+                                            print("IP form auto-fill stopped"
+                                                  " (%s) - continue manually."
+                                                  % str(_e)[:120])
+                                            _st("ip_manual")
                                 else:
                                     _st("action_manual")
                                     print("Logged in - the menu link was not "
@@ -2851,6 +3097,9 @@ async def portal_launch_token(
         # Iter 731 (user request) — "Remove Without-UAN Employees": the
         # runner's ECR fetch excludes blank-UAN members when this is set.
         "ecr_exclude_no_uan": bool((payload or {}).get("ecr_exclude_no_uan")),
+        # Iter 766 (user video) — ESIC IP Registration: the selected
+        # employee whose Employee Master details auto-fill the form.
+        "ip_user_id": (payload or {}).get("user_id") or None,
     })
     # Iter 692 — pre-check the firm's portal login RIGHT NOW and tell the UI
     # exactly what was found (or precisely why not), so the user sees the
@@ -2870,6 +3119,60 @@ async def portal_launch_token(
         "creds_diagnosis": diag["diagnosis"],
         "creds_warning": diag.get("warning") or "",
     }
+
+
+@router.get("/portal-ext/ip-register-data")
+async def portal_ext_ip_register_data(token: str):
+    """Iter 766 (user video) — ESIC IP Registration: the Runner fetches the
+    selected employee's Employee Master details to auto-fill the ESIC
+    'Enrol New Employee' registration form."""
+    doc = await db.automation_ext_tokens.find_one({"token": token})
+    if not doc:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    uid = doc.get("ip_user_id")
+    if not uid:
+        raise HTTPException(
+            status_code=400,
+            detail="No employee selected — pick the employee in the "
+                   "Automation Studio (step 3) before opening the portal.")
+    u = await db.users.find_one({"user_id": uid}, {"_id": 0})
+    if not u:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    def _dt(v: Any) -> str:
+        v = str(v or "").strip()
+        for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(v[:10], fmt).strftime("%d/%m/%Y")
+            except ValueError:
+                continue
+        return v
+
+    return {"ok": True, "employee": {
+        "name": u.get("name") or "",
+        "employee_code": u.get("employee_code") or "",
+        "father_name": u.get("father_name") or "",
+        "mother_name": u.get("mother_name") or "",
+        "dob": _dt(u.get("dob")),
+        "doj": _dt(u.get("doj")),
+        "gender": (str(u.get("gender") or "")[:1]).upper(),
+        "marital_status": u.get("marital_status") or "",
+        "phone": re.sub(r"\D", "", str(u.get("phone") or ""))[-10:],
+        "email": u.get("email") or "",
+        "aadhaar_no": re.sub(r"\D", "", str(u.get("aadhaar_no") or ""))[:12],
+        "address": u.get("present_address") or u.get("address") or "",
+        "pincode": str(u.get("pincode") or ""),
+        "state": u.get("state") or "",
+        "district": u.get("district") or "",
+        "bank_account": str(u.get("bank_account") or ""),
+        "bank_name": u.get("bank_name") or "",
+        "branch_name": u.get("branch_name") or "",
+        "ifsc": u.get("ifsc") or u.get("ifsc_code") or "",
+        "nominee_name": u.get("nominee_name") or "",
+        "nominee_relation": u.get("nominee_relation") or "",
+        "esi_ip_no": str(u.get("esi_ip_no") or ""),
+        "uan_no": str(u.get("uan_no") or ""),
+    }}
 
 
 @router.get("/admin/portal-automation/ecr-preview")
